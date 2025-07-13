@@ -11,7 +11,7 @@ import os
 os.makedirs("resultados", exist_ok=True)
 
 # 1. Cargar datos
-df = pd.read_excel("preguntas.xlsx")
+df = pd.read_excel("Respuestas.xlsx")
 columnas_preguntas = [col for col in df.columns if col.startswith("Q")]
 X = df[columnas_preguntas]
 
