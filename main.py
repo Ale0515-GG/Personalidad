@@ -140,10 +140,23 @@ if uploaded_file:
     df_cat_filtrado["PCA1"] = coords[:, 0]
     df_cat_filtrado["PCA2"] = coords[:, 1]
 
+   # Proyectar los centroides al espacio PCA
+    centroides_pca = pca.transform(kmeans.cluster_centers_)
+
+    # Crear el gráfico PCA con centroides
     fig3, ax3 = plt.subplots()
+
+    # Gráfico de los puntos por clúster
     sns.scatterplot(data=df_cat_filtrado, x="PCA1", y="PCA2", hue="Cluster", palette="tab10", ax=ax3)
-    ax3.set_title("Visualización PCA de Clústeres")
+
+    # Dibujar los centroides como puntos (círculo) de diferente color (ej. rojo)
+    ax3.scatter(centroides_pca[:, 0], centroides_pca[:, 1], 
+                s=50, c='red', marker='o', label='Centroide')
+
+    ax3.set_title("Visualización PCA de Clústeres con Centroides")
+    ax3.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     st.pyplot(fig3)
+
 
     # Descargar modelo
     model_buffer = BytesIO()
