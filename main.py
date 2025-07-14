@@ -155,9 +155,22 @@ if uploaded_file:
     st.subheader("Descarga de resultados")
     excel_buffer = BytesIO()
     with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+        # Hoja principal con datos
         df_cat_filtrado.to_excel(writer, sheet_name="Datos con Personalidad", index=False)
+
+        # Conteo MBTI
         df_cat_filtrado["Personalidad"].value_counts().to_excel(writer, sheet_name="Conteo MBTI")
+
+        # Conteo por Categoría (modelo MBTI)
+        df_cat_filtrado["Categoría"].value_counts().rename_axis("Categoría").reset_index(name="Cantidad")\
+            .to_excel(writer, sheet_name="Conteo por Categoría MBTI", index=False)
+
+        # Conteo por Categoría y Clúster (K-Means)
+        pd.crosstab(df_cat_filtrado["Categoría"], df_cat_filtrado["Cluster"]).to_excel(writer, sheet_name="Categoría vs Clusters")
+
+        # Matriz MBTI vs Clúster
         pd.crosstab(df_cat_filtrado["Personalidad"], df_cat_filtrado["Cluster"]).to_excel(writer, sheet_name="MBTI vs Clusters")
+
 
     st.download_button("Descargar Excel completo", data=excel_buffer.getvalue(), file_name="resultado_personalidades.xlsx")
 
