@@ -16,7 +16,7 @@ uploaded_file = st.file_uploader("Cargar archivo Excel (.xlsx)", type=["xlsx"])
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
     st.subheader("Vista previa de los datos")
-    st.dataframe(df.head())
+    st.dataframe(df.head(10))
 
     st.success(f"Total de registros cargados: {len(df)}")
 
@@ -54,47 +54,77 @@ if uploaded_file:
 
     df["Personalidad"] = preguntas.apply(calcular_mbti, axis=1)
 
+    # Añadir Categoría General según el tipo de personalidad
+    categoria_map = {
+        "INTJ": "Analistas", "INTP": "Analistas", "ENTJ": "Analistas", "ENTP": "Analistas",
+        "INFJ": "Diplomáticos", "INFP": "Diplomáticos", "ENFJ": "Diplomáticos", "ENFP": "Diplomáticos",
+        "ISTJ": "Centinelas", "ISFJ": "Centinelas", "ESTJ": "Centinelas", "ESFJ": "Centinelas",
+        "ISTP": "Exploradores", "ISFP": "Exploradores", "ESTP": "Exploradores", "ESFP": "Exploradores"
+    }
+
+    df["Categoría"] = df["Personalidad"].map(categoria_map)
+
+    st.subheader("Distribución por Categoría de Personalidad (Sin K-Means)")
+
+    categorias_detectadas = df["Categoría"].value_counts()
+    seleccionadas_cat = st.multiselect("Selecciona categorías para mostrar", categorias_detectadas.index.tolist(), default=categorias_detectadas.index.tolist())
+    df_cat_filtrado = df[df["Categoría"].isin(seleccionadas_cat)].copy()
+
+    fig_cat, ax_cat = plt.subplots()
+    sns.countplot(data=df_cat_filtrado, x="Categoría", hue="Personalidad", palette="Set3", ax=ax_cat)
+    ax_cat.set_title("Distribución de Personalidades por Categoría (Sin K-Means)")
+    ax_cat.set_ylabel("Cantidad")
+    ax_cat.legend(title="Personalidad", bbox_to_anchor=(1.05, 1), loc='upper left')
+    st.pyplot(fig_cat)
+
+    fig_cat_buffer = BytesIO()
+    fig_cat.savefig(fig_cat_buffer, format="png")
+    st.download_button("Descargar gráfico por Categoría", fig_cat_buffer.getvalue(), file_name="grafico_categoria_sin_kmeans.png")
+
+    st.subheader("Conteo de Resultados por Categoría")
+    conteo_categoria = df_cat_filtrado["Categoría"].value_counts().reset_index()
+    conteo_categoria.columns = ["Categoría", "Cantidad"]
+    st.dataframe(conteo_categoria)
+
     # Análisis sin K-Means
     st.subheader("Distribución de Personalidades (Sin K-Means)")
-    tipos_detectados = df["Personalidad"].value_counts()
+    tipos_detectados = df_cat_filtrado["Personalidad"].value_counts()
     seleccionados = st.multiselect("Selecciona tipos para mostrar", tipos_detectados.index.tolist(), default=tipos_detectados.index.tolist())
-    df_filtrado = df[df["Personalidad"].isin(seleccionados)]
+    df_filtrado = df_cat_filtrado[df_cat_filtrado["Personalidad"].isin(seleccionados)]
 
     fig1, ax1 = plt.subplots()
-    sns.barplot(x=df_filtrado["Personalidad"].value_counts().index, 
+    sns.barplot(x=df_filtrado["Personalidad"].value_counts().index,
                 y=df_filtrado["Personalidad"].value_counts().values,
                 palette="Set2", ax=ax1)
     ax1.set_title("Distribución de Personalidades (Sin K-Means)")
     ax1.set_ylabel("Cantidad")
     st.pyplot(fig1)
 
-    # Descargar gráfico sin K-Means
     fig1_buffer = BytesIO()
     fig1.savefig(fig1_buffer, format="png")
     st.download_button("⬇ Descargar gráfico sin K-Means", fig1_buffer.getvalue(), file_name="grafico_sin_kmeans.png")
 
     # --------------------------------
-    # ENTRENAMIENTO K-MEANS
+    # ENTRENAMIENTO K-MEANS sobre categorías seleccionadas
     st.subheader("Clustering con K-Means (No Supervisado)")
 
     n_clusters = st.slider("Selecciona número de clústeres", min_value=2, max_value=10, value=4)
+    preguntas_filtradas = preguntas.loc[df_cat_filtrado.index]
     scaler = StandardScaler()
-    preguntas_scaled = scaler.fit_transform(preguntas)
+    preguntas_scaled = scaler.fit_transform(preguntas_filtradas)
 
     kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-    df["Cluster"] = kmeans.fit_predict(preguntas_scaled)
+    df_cat_filtrado["Cluster"] = kmeans.fit_predict(preguntas_scaled)
 
     st.success(f"K-Means entrenado con {n_clusters} clústeres.")
     st.write("Distribución por Clúster:")
-    st.bar_chart(df["Cluster"].value_counts().sort_index())
+    st.bar_chart(df_cat_filtrado["Cluster"].value_counts().sort_index())
 
-    # Comparación entre MBTI y clústeres
     st.write("Comparación entre Personalidad y Clúster asignado")
-    st.dataframe(pd.crosstab(df["Personalidad"], df["Cluster"]))
+    st.dataframe(pd.crosstab(df_cat_filtrado["Personalidad"], df_cat_filtrado["Cluster"]))
 
-    # Gráfico de barras K-Means
     fig2, ax2 = plt.subplots()
-    sns.countplot(data=df, x="Cluster", hue="Personalidad", palette="tab10", ax=ax2)
+    sns.countplot(data=df_cat_filtrado, x="Cluster", hue="Personalidad", palette="tab10", ax=ax2)
     ax2.set_title("Distribución de Personalidades por Clúster (K-Means)")
     ax2.set_ylabel("Cantidad")
     ax2.legend(title="Personalidad", bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -107,11 +137,11 @@ if uploaded_file:
     # PCA 2D
     pca = PCA(n_components=2)
     coords = pca.fit_transform(preguntas_scaled)
-    df["PCA1"] = coords[:, 0]
-    df["PCA2"] = coords[:, 1]
+    df_cat_filtrado["PCA1"] = coords[:, 0]
+    df_cat_filtrado["PCA2"] = coords[:, 1]
 
     fig3, ax3 = plt.subplots()
-    sns.scatterplot(data=df, x="PCA1", y="PCA2", hue="Cluster", palette="tab10", ax=ax3)
+    sns.scatterplot(data=df_cat_filtrado, x="PCA1", y="PCA2", hue="Cluster", palette="tab10", ax=ax3)
     ax3.set_title("Visualización PCA de Clústeres")
     st.pyplot(fig3)
 
@@ -125,15 +155,15 @@ if uploaded_file:
     st.subheader("Descarga de resultados")
     excel_buffer = BytesIO()
     with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
-        df.to_excel(writer, sheet_name="Datos con Personalidad", index=False)
-        df["Personalidad"].value_counts().to_excel(writer, sheet_name="Conteo MBTI")
-        pd.crosstab(df["Personalidad"], df["Cluster"]).to_excel(writer, sheet_name="MBTI vs Clusters")
+        df_cat_filtrado.to_excel(writer, sheet_name="Datos con Personalidad", index=False)
+        df_cat_filtrado["Personalidad"].value_counts().to_excel(writer, sheet_name="Conteo MBTI")
+        pd.crosstab(df_cat_filtrado["Personalidad"], df_cat_filtrado["Cluster"]).to_excel(writer, sheet_name="MBTI vs Clusters")
 
     st.download_button("Descargar Excel completo", data=excel_buffer.getvalue(), file_name="resultado_personalidades.xlsx")
 
     st.info("""
     El archivo incluye:
-    * Datos con personalidad y clúster
+    * Datos con personalidad y clúster (solo categorías seleccionadas)
     * Conteo de tipos MBTI
     * Comparación entre MBTI y K-Means
     También puedes descargar los gráficos y el modelo K-Means entrenado.
