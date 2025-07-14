@@ -5,86 +5,135 @@ import seaborn as sns
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
-from fpdf import FPDF
-import os
+import pickle
+from io import BytesIO
 
-st.set_page_config(page_title="Análisis de Personalidades", layout="wide")
-
-st.title("🧠 Agrupación de Personalidades (K-Means)")
-st.write("Carga un archivo de Excel con respuestas a preguntas para agrupar perfiles de personalidad.")
+st.set_page_config(page_title="Detección de Personalidades MBTI", layout="wide")
+st.title("🧠 Análisis y Detección de Personalidades MBTI")
 
 uploaded_file = st.file_uploader("📤 Cargar archivo Excel (.xlsx)", type=["xlsx"])
 
 if uploaded_file:
-    with st.spinner("Procesando datos..."):
-        # Crear carpeta resultados
-        os.makedirs("resultados", exist_ok=True)
+    df = pd.read_excel(uploaded_file)
+    st.subheader("📄 Vista previa de los datos")
+    st.dataframe(df.head())
 
-        df = pd.read_excel(uploaded_file)
-        columnas_preguntas = [col for col in df.columns if col.startswith("Q")]
-        X = df[columnas_preguntas]
+    st.success(f"📈 Total de registros cargados: {len(df)}")
 
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
+    # Filtrar por género
+    genero_col = next((col for col in df.columns if "género" in col.lower()), None)
+    if genero_col:
+        genero_opcion = st.radio("👥 Filtrar por género", ["Ambos", "Masculino", "Femenino"])
+        if genero_opcion != "Ambos":
+            df = df[df[genero_col].str.lower() == genero_opcion.lower()]
 
-        kmeans = KMeans(n_clusters=16, random_state=42, n_init=10)
-        df["Cluster"] = kmeans.fit_predict(X_scaled)
+    # Detectar preguntas
+    columnas_ignoradas = ["Nombre", "Género", "Edad", "Edad:", "Género:"]
+    preguntas = df.select_dtypes(include=["number"]).copy()
+    preguntas = preguntas[[col for col in preguntas.columns if col not in columnas_ignoradas]]
 
-        cluster_personalidad = {
-            0: "Arquitecto (INTJ)", 1: "Defensor (ISFJ)", 2: "Ejecutivo (ESTJ)", 3: "Activista (ENFP)",
-            4: "Logista (ISTJ)", 5: "Lógico (INTP)", 6: "Cónsul (ESFJ)", 7: "Mediador (INFP)",
-            8: "Animador (ESFP)", 9: "Protagonista (ENFJ)", 10: "Abogado (INFJ)", 11: "Virtuoso (ISTP)",
-            12: "Emprendedor (ESTP)", 13: "Comandante (ENTJ)", 14: "Innovador (ENTP)", 15: "Aventurero (ISFP)"
-        }
-        df["Personalidad"] = df["Cluster"].map(cluster_personalidad)
+    if preguntas.empty:
+        st.error("❌ No se encontraron columnas numéricas válidas.")
+        st.stop()
 
-        df.to_excel("resultados/resultados.xlsx", index=False)
+    # Mapeo MBTI
+    dimension_map = {
+        "EI": preguntas.iloc[:, [0, 1, 2, 3, 4]],
+        "SN": preguntas.iloc[:, [5, 6, 7, 8, 9]],
+        "TF": preguntas.iloc[:, [10, 11, 12, 13, 14]],
+        "JP": preguntas.iloc[:, [15, 16, 17, 18, 19]],
+    }
 
-        pca = PCA(n_components=2)
-        pca_result = pca.fit_transform(X_scaled)
-        df["PCA1"] = pca_result[:, 0]
-        df["PCA2"] = pca_result[:, 1]
+    def calcular_mbti(fila):
+        letras = ""
+        letras += "I" if dimension_map["EI"].loc[fila.name].mean() > 3 else "E"
+        letras += "N" if dimension_map["SN"].loc[fila.name].mean() > 3 else "S"
+        letras += "F" if dimension_map["TF"].loc[fila.name].mean() > 3 else "T"
+        letras += "P" if dimension_map["JP"].loc[fila.name].mean() > 3 else "J"
+        return letras
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-        sns.scatterplot(data=df, x="PCA1", y="PCA2", hue="Personalidad", palette="tab20", s=100, ax=ax)
-        ax.set_title("Clústeres de Personalidades - KMeans")
-        st.pyplot(fig)
+    df["Personalidad"] = preguntas.apply(calcular_mbti, axis=1)
 
-        st.subheader("📋 Tabla de resultados (primeros 10 registros)")
-        st.dataframe(df[["Cluster", "Personalidad"] + columnas_preguntas].head(10))
+    # Análisis sin K-Means
+    st.subheader("📊 Distribución de Personalidades (Sin K-Means)")
+    tipos_detectados = df["Personalidad"].value_counts()
+    seleccionados = st.multiselect("Selecciona tipos para mostrar", tipos_detectados.index.tolist(), default=tipos_detectados.index.tolist())
+    df_filtrado = df[df["Personalidad"].isin(seleccionados)]
 
-        # Guardar gráfico
-        grafico_path = "resultados/grafico.png"
-        fig.savefig(grafico_path)
+    fig1, ax1 = plt.subplots()
+    sns.barplot(x=df_filtrado["Personalidad"].value_counts().index, 
+                y=df_filtrado["Personalidad"].value_counts().values,
+                palette="Set2", ax=ax1)
+    ax1.set_title("Distribución de Personalidades (Sin K-Means)")
+    ax1.set_ylabel("Cantidad")
+    st.pyplot(fig1)
 
-        class PDF(FPDF):
-            def header(self):
-                self.set_font('Arial', 'B', 14)
-                self.cell(0, 10, "Reporte de Agrupación de Personalidades (K-Means)", ln=True, align="C")
-                self.ln(10)
+    # Descargar gráfico sin K-Means
+    fig1_buffer = BytesIO()
+    fig1.savefig(fig1_buffer, format="png")
+    st.download_button("⬇️ Descargar gráfico sin K-Means", fig1_buffer.getvalue(), file_name="grafico_sin_kmeans.png")
 
-            def tabla(self, data):
-                self.set_font("Arial", size=9)
-                col_width = self.w / (len(data.columns) + 1)
-                self.set_fill_color(220, 220, 255)
-                for col in data.columns:
-                    self.cell(col_width, 8, str(col), border=1, fill=True)
-                self.ln()
-                for _, row in data.iterrows():
-                    for item in row:
-                        self.cell(col_width, 8, str(item), border=1)
-                    self.ln()
+    # --------------------------------
+    # ENTRENAMIENTO K-MEANS
+    st.subheader("🤖 Clustering con K-Means (No Supervisado)")
 
-        pdf = PDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        pdf.cell(0, 10, "Distribución visual de los clústeres:", ln=True)
-        pdf.image(grafico_path, x=10, w=190)
-        pdf.ln(10)
-        pdf.cell(0, 10, "Tabla de resultados (primeros 10 usuarios):", ln=True)
-        pdf.tabla(df[["Cluster", "Personalidad"] + columnas_preguntas].head(10))
-        pdf.output("resultados/reporte.pdf")
+    n_clusters = st.slider("Selecciona número de clústeres", min_value=2, max_value=10, value=4)
+    scaler = StandardScaler()
+    preguntas_scaled = scaler.fit_transform(preguntas)
 
-        st.success("✅ ¡Análisis completado con éxito!")
-        st.download_button("⬇️ Descargar Excel", data=open("resultados/resultados.xlsx", "rb"), file_name="resultados.xlsx")
-        st.download_button("⬇️ Descargar PDF", data=open("resultados/reporte.pdf", "rb"), file_name="reporte.pdf", mime="application/pdf")
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+    df["Cluster"] = kmeans.fit_predict(preguntas_scaled)
+
+    st.success(f"🎯 K-Means entrenado con {n_clusters} clústeres.")
+    st.write("🔢 Distribución por Clúster:")
+    st.bar_chart(df["Cluster"].value_counts().sort_index())
+
+    # Comparación entre MBTI y clústeres
+    st.write("📌 Comparación entre Personalidad y Clúster asignado")
+    st.dataframe(pd.crosstab(df["Personalidad"], df["Cluster"]))
+
+    # Gráfico de barras K-Means
+    fig2, ax2 = plt.subplots()
+    sns.countplot(data=df, x="Cluster", hue="Personalidad", palette="tab10", ax=ax2)
+    ax2.set_title("Distribución de Personalidades por Clúster (K-Means)")
+    ax2.set_ylabel("Cantidad")
+    st.pyplot(fig2)
+
+    fig2_buffer = BytesIO()
+    fig2.savefig(fig2_buffer, format="png")
+    st.download_button("⬇️ Descargar gráfico con K-Means", fig2_buffer.getvalue(), file_name="grafico_kmeans.png")
+
+    # PCA 2D
+    pca = PCA(n_components=2)
+    coords = pca.fit_transform(preguntas_scaled)
+    df["PCA1"] = coords[:, 0]
+    df["PCA2"] = coords[:, 1]
+
+    fig3, ax3 = plt.subplots()
+    sns.scatterplot(data=df, x="PCA1", y="PCA2", hue="Cluster", palette="tab10", ax=ax3)
+    ax3.set_title("🔍 Visualización PCA de Clústeres")
+    st.pyplot(fig3)
+
+    # Descargar modelo
+    model_buffer = BytesIO()
+    pickle.dump(kmeans, model_buffer)
+    st.download_button("⬇️ Descargar modelo K-Means entrenado", model_buffer.getvalue(), file_name="modelo_kmeans.pkl")
+
+    # --------------------------------
+    # Descarga de Excel
+    st.subheader("📂 Descarga de resultados")
+    excel_buffer = BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+        df.to_excel(writer, sheet_name="Datos con Personalidad", index=False)
+        df["Personalidad"].value_counts().to_excel(writer, sheet_name="Conteo MBTI")
+        pd.crosstab(df["Personalidad"], df["Cluster"]).to_excel(writer, sheet_name="MBTI vs Clusters")
+
+    st.download_button("⬇️ Descargar Excel completo", data=excel_buffer.getvalue(), file_name="resultado_personalidades.xlsx")
+
+    st.info("""
+    El archivo incluye:
+    ✅ Datos con personalidad y clúster
+    ✅ Conteo de tipos MBTI
+    ✅ Comparación entre MBTI y K-Means
+    También puedes descargar los gráficos y el modelo K-Means entrenado.
+    """)
